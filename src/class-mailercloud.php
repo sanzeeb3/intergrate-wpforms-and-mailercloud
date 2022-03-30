@@ -40,6 +40,7 @@ class Integrate_WPForms_And_Mailercloud extends WPForms_Provider {
 
 		// Fire for each connection.
 		foreach ( $form_data['providers'][ $this->slug ] as $connection ) {
+
 			$account_id      = $connection['account_id'];
 			$list_id         = $connection['list_id'];
 			$email_data      = explode( '.', $connection['fields']['email'] );
@@ -59,7 +60,7 @@ class Integrate_WPForms_And_Mailercloud extends WPForms_Provider {
 
 			if ( ! $pass ) {
 				wpforms_log(
-					'Mailcloud Subscription stopped by conditional logic',
+					'Mailercloud Subscription stopped by conditional logic',
 					$fields,
 					array(
 						'type'    => array( 'provider', 'conditional_logic' ),
@@ -71,20 +72,45 @@ class Integrate_WPForms_And_Mailercloud extends WPForms_Provider {
 				continue;
 			}
 
+			$body = array(
+				'email'	=> $email,
+				'name' => $first_name,
+				'last_name'	=> $last_name,
+				'list_id'	=> $list_id
+			);
+
 			/**
 			 * Add a subscriber.
 			 *
-			 * @link https://github.com/mailpoet/mailpoet/blob/master/mailpoet/doc/api_methods/AddSubscriber.md.
+			 * @link https://apidoc.mailercloud.com/docs/mailercloud-api/b3A6MTA4NjcwNTA-create-contact
 			 */
-			$this->connect->addSubscriber(
-				array(
-					'email'      => $email,
-					'first_name' => $first_name,
-					'last_name'  => $last_name,
-				),
+	
+			$providers = get_option( 'wpforms_providers' );
 
-				array( $connection['list_id'] )				
+			$api = ! empty( $providers[ $this->slug ][ $account_id ]['api'] ) ? $providers[ $this->slug ][ $account_id ]['api'] : '';
+
+			$url = 'https://cloudapi.mailercloud.com/v1/contacts';
+
+			// @todo Make use of wp_remote_post instead.
+			$curl = curl_init($url);
+			curl_setopt($curl, CURLOPT_URL, $url);
+			curl_setopt($curl, CURLOPT_POST, true);
+			curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+
+			$headers = array(
+				"Authorization: " . $api,
+				"Content-Type: application/json",
 			);
+			curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+
+			curl_setopt($curl, CURLOPT_POSTFIELDS, wp_json_encode( $body ) );
+
+			//for debug only!
+			curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
+			curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+
+			$resp = curl_exec($curl);
+			curl_close($curl);
 		}
 	}
 
@@ -100,6 +126,33 @@ class Integrate_WPForms_And_Mailercloud extends WPForms_Provider {
 	 */
 	public function api_auth( $data = array(), $form_id = '' ) {
 
+		$lists = $this->mailercloud_lists( $data['apikey'] );
+
+		if ( empty( $lists ) ) {
+			return $this->error( 'Could not connect or fetch lists. Please make sure the API key is correct and the account has lists, or contact support.' );
+		}
+
+		$id                              = uniqid();
+		$providers                       = get_option( 'wpforms_providers', array() );
+		$providers[ $this->slug ][ $id ] = array(
+			'api'       => trim( $data['apikey'] ),
+			'label'     => sanitize_text_field( $data['label'] ),
+			'date'      => time(),
+		);
+		update_option( 'wpforms_providers', $providers );
+
+		return $id;
+	}
+
+	/**
+	 * Get lists from Mailercloud.
+	 *
+	 * @since 1.0.0
+	 * 
+	 * @return mixed.
+	 */
+	public function mailercloud_lists( $api_key ) {
+
 		// Ping to Mailercloud to authenticate the api.
 		$url = "https://cloudapi.mailercloud.com/v1/lists/search";
 
@@ -110,7 +163,7 @@ class Integrate_WPForms_And_Mailercloud extends WPForms_Provider {
 		curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
 
 		$headers = array(
-			"Authorization: " . $data['apikey'],
+			"Authorization: " . $api_key,
 			"Content-Type: application/json",
 		);
 		curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
@@ -128,21 +181,19 @@ class Integrate_WPForms_And_Mailercloud extends WPForms_Provider {
 
 		$result = json_decode( $resp );
 
+		// The result is a collection of object, but the base class is expecting the array. So, we're casting each list into array.
+		
+		$lists = [];
 
-		if ( isset( $result->errors ) || empty( $result->data ) ) {
-			return $this->error( 'API authorization failed. Please make sure the API key is correct or contact support.' );
+		if ( ! empty( $result->data ) ) {
+
+			foreach( $result->data as $list ) {
+				$list = (array) $list;
+				$lists[] = $list;
+			}
 		}
 
-		$id                              = uniqid();
-		$providers                       = get_option( 'wpforms_providers', array() );
-		$providers[ $this->slug ][ $id ] = array(
-			'api'       => trim( $data['apikey'] ),
-			'label'     => sanitize_text_field( $data['label'] ),
-			'date'      => time(),
-		);
-		update_option( 'wpforms_providers', $providers );
-
-		return $id;
+		return (array) $lists;
 	}
 
 	/**
@@ -156,24 +207,42 @@ class Integrate_WPForms_And_Mailercloud extends WPForms_Provider {
 	 * @return mixed array or WP_Error object.
 	 */
 	public function api_lists( $connection_id = '', $account_id = '' ) {
+		$providers = get_option( 'wpforms_providers' );
 
-		$this->api_connect( $account_id );
+		$key = ! empty( $providers[ $this->slug ][ $account_id ]['api'] ) ? $providers[ $this->slug ][ $account_id ]['api'] : '';
 
-		try {
-			$lists = $this->api[ $account_id ]->get_lists();
+		return ! empty( $this->mailercloud_lists( $key ) ) ? $this->mailercloud_lists( $key ) : [];
+	}
 
-			return $lists;
-		} catch ( Exception $e ) {
-			wpforms_log(
-				'Campaign Monitor API error',
-				$e->getMessage(),
-				array(
-					'type' => array( 'provider', 'error' ),
-				)
-			);
+	/**
+	 * Retrieve provider account fields.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @return array
+	 */
+	public function api_fields( $connection_id = '', $account_id = '', $list_id = '' ) {
 
-			return $this->error( 'API list error: ' . $e->getMessage() );
-		}
+		return array(
+			array(
+				'name'       => 'Email',
+				'req'        => true,
+				'tag'        => 'email',
+				'field_type' => 'email',
+			),
+			array(
+				'name'       => 'First Name',
+				'req'        => false,
+				'tag'        => 'first_name',
+				'field_type' => 'text',
+			),
+			array(
+				'name'       => 'Last Name',
+				'req'        => false,
+				'tag'        => 'last_name',
+				'field_type' => 'text',
+			),
+		);
 	}
 
 	/**
