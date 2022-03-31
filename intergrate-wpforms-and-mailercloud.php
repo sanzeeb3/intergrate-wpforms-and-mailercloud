@@ -6,6 +6,9 @@
  * Author: Sanjeev Aryal
  * Author URI: https://www.sanjeebaryal.com.np
  * Text Domain: integrate-wpforms-and-mailercloud
+ *
+ * @package Integrate WPForms And Mailercloud
+ * @author Sanjeev Aryal
  */
 
 defined( 'ABSPATH' ) || die();
@@ -22,10 +25,10 @@ add_action(
 	'wpforms_loaded',
 	function() {
 
-	require_once INTEGRATE_WPFORMS_AND_MAILERCLOUD_PLUGIN_PATH . '/src/class-mailercloud.php';
-    
-    // Load translated strings.
-    load_plugin_textdomain( 'integrate-wpforms-and-mailercloud', false, dirname( plugin_basename( __FILE__ ) ) . '/languages/' );
+		require_once INTEGRATE_WPFORMS_AND_MAILERCLOUD_PLUGIN_PATH . '/src/class-mailercloud.php';
+
+		// Load translated strings.
+		load_plugin_textdomain( 'integrate-wpforms-and-mailercloud', false, dirname( plugin_basename( __FILE__ ) ) . '/languages/' );
 
 	}
 );
